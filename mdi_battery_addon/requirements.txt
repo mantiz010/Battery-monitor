@@ -1,0 +1,6 @@
+websockets
+pandas
+matplotlib
+requests
+flask
+waitress
