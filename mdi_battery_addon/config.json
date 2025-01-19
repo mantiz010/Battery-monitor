@@ -1,16 +1,24 @@
 {
-  "name": "MDI Battery Entities Add-on",
+  "name": "MDI Battery Add-on (Full Features)",
   "slug": "mdi_battery_addon",
   "version": "1.0.0",
-  "description": "Tracks battery entities via Home Assistant WebSocket, uses MDI icons, color-codes them, notifies on low battery, and marks stale sensors with a red unknown icon.",
-  "arch": ["armhf", "armv7", "aarch64", "amd64", "i386"],
+  "description": "A fully loaded add-on with MDI battery icons, WS connection to HA, stale detection, notifications, graphing, and PIP_BREAK_SYSTEM_PACKAGES=1 fix.",
+  "arch": [
+    "armhf",
+    "armv7",
+    "aarch64",
+    "amd64",
+    "i386"
+  ],
   "startup": "services",
   "boot": "auto",
-
   "options": {
-    "HA_URL": "ws://homeassistant.local:8123/api/websocket",
+    "HA_URL": "ws://172.168.1.8:8123/api/websocket",
     "HA_TOKEN": "",
-    "ENTITIES": ["sensor.phone_battery", "sensor.motion_sensor_battery"],
+    "ENTITIES": [
+      "sensor.my_phone_battery",
+      "sensor.my_motion_sensor_battery"
+    ],
     "BATTERY_THRESHOLD": 20.0,
     "UNRESPONSIVE_MINUTES": 30,
     "NOTIFY_SERVICE": "notify.notify"
@@ -23,7 +31,6 @@
     "UNRESPONSIVE_MINUTES": "int",
     "NOTIFY_SERVICE": "str"
   },
-
   "ingress": true,
   "ingress_port": 5000
 }
