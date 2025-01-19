@@ -1,0 +1,4 @@
+#!/usr/bin/execlineb -P
+
+# Run the Python application
+/usr/bin/python3 /app/main.py
