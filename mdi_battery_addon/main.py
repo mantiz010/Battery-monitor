@@ -24,21 +24,19 @@ from flask import Flask
 SENSOR_DF = pd.DataFrame(columns=["entity_id", "value", "timestamp"])
 SENSOR_DF_LOCK = threading.Lock()
 
-# Latest reading per entity
-LAST_READINGS = {}
+LAST_READINGS = {}  # { "entity_id": {"value": float, "last_update": datetime} }
 
-# Flask app
 app = Flask(__name__)
 
 ##############################################################################
-# ENVIRONMENT VARIABLES
+# ENV VARS FROM run.sh
 ##############################################################################
 def env(key, default=None):
     return os.environ.get(key, default)
 
 HA_WS_URL = env("HA_URL", "ws://homeassistant.local:8123/api/websocket")
 HA_TOKEN = env("HA_TOKEN", "")
-ENTITIES = json.loads(env("ENTITIES", '["sensor.my_phone_battery"]'))
+ENTITIES = json.loads(env("ENTITIES", '[]'))
 BATTERY_THRESHOLD = float(env("BATTERY_THRESHOLD", "20.0"))
 UNRESPONSIVE_MINUTES = int(env("UNRESPONSIVE_MINUTES", "30"))
 NOTIFY_SERVICE = env("NOTIFY_SERVICE", "notify.notify")
@@ -47,32 +45,19 @@ NOTIFY_SERVICE = env("NOTIFY_SERVICE", "notify.notify")
 # MDI BATTERY SVG PATHS
 ##############################################################################
 MDI_PATHS = {
-    # battery-unknown
     "unknown": "M17,4H7V2H17V4M17,4H19V22H5V4H7V6H17V4M15,11C15,9.34 13.66,8 12,8C10.34,8 9,9.34 9,11H11C11,10.45 11.45,10 12,10C12.55,10 13,10.45 13,11C13,11.55 12.55,12 12,12H11C9.9,12 9,12.9 9,14V15H11V14C11,13.45 11.45,13 12,13C12.55,13 13,13.45 13,14C13,14.55 12.55,15 12,15H11C9.9,15 9,15.9 9,17V18H15V17C15,15.66 14,14.66 13,14.16C13.65,13.78 14,13.16 14,12.5C14,11.79 13.7,11.21 13.23,10.76C14.37,10.36 15,9.27 15,8.11V8M17,8V6H7V8H17Z",
-
-    # battery (100%)
-    "battery": "M16,4H8V2H16V4M16,4H18V22H6V4H8V6H16V4Z",
-    # battery-90
+    "battery":  "M16,4H8V2H16V4M16,4H18V22H6V4H8V6H16V4Z",
     "battery90": "M16,4H8V2H16V4M16,4H18V9H6V4H8V6H16V4Z",
-    # battery-80
     "battery80": "M16,4H8V2H16V4M16,4H18V11H6V4H8V6H16V4Z",
-    # battery-60
     "battery60": "M16,4H8V2H16V4M16,4H18V15H6V4H8V6H16V4Z",
-    # battery-50
     "battery50": "M16,4H8V2H16V4M16,4H18V17H6V4H8V6H16V4Z",
-    # battery-30
     "battery30": "M16,4H8V2H16V4M16,4H18V19H6V4H8V6H16V4Z",
-    # battery-20
     "battery20": "M16,4H8V2H16V4M16,4H18V20H6V4H8V6H16V4Z",
-    # battery-10
     "battery10": "M16,4H8V2H16V4M16,4H18V21H6V4H8V6H16V4Z"
 }
 
 def get_battery_svg(value: float) -> str:
-    """
-    Pick an MDI battery icon + color based on numeric battery value.
-    """
-    # Color
+    """Pick color-coded battery icon based on numeric level."""
     if value >= 80:
         color = "green"
     elif value >= 50:
@@ -80,7 +65,6 @@ def get_battery_svg(value: float) -> str:
     else:
         color = "red"
 
-    # Path
     if value >= 90:
         path = MDI_PATHS["battery"]
     elif value >= 80:
@@ -106,23 +90,23 @@ def get_battery_svg(value: float) -> str:
     return svg
 
 def get_battery_svg_unknown() -> str:
-    """Return a red battery-unknown icon."""
-    path = MDI_PATHS["unknown"]
+    """Return a red unknown battery icon for stale sensors."""
     return f"""
     <svg width="20" height="20" viewBox="0 0 24 24">
-      <path fill="red" d="{path}" />
+      <path fill="red" d="{MDI_PATHS['unknown']}" />
     </svg>
     """
 
 ##############################################################################
-# NOTIFICATION
+# NOTIFY HA
 ##############################################################################
 def notify_ha(message: str):
-    """Send a notification to Home Assistant if HA_TOKEN is set."""
+    """Send a notification to HA if HA_TOKEN is set."""
     if not HA_TOKEN:
-        print("[Warn] HA_TOKEN not provided. Skipping notification.")
+        print("[Warn] No HA_TOKEN set; skipping notification.")
         return
 
+    # Convert ws:// to http:// for REST calls
     rest_url = HA_WS_URL.replace("ws", "http").replace("/api/websocket", "") + "/api/services/" + NOTIFY_SERVICE
     headers = {
         "Authorization": f"Bearer {HA_TOKEN}",
@@ -143,14 +127,6 @@ def notify_ha(message: str):
 # HANDLE STATE CHANGES
 ##############################################################################
 def handle_state_changed(event_data):
-    """
-    event_data structure:
-      {
-        "entity_id": "...",
-        "old_state": {...},
-        "new_state": {...}
-      }
-    """
     entity_id = event_data.get("entity_id")
     if entity_id not in ENTITIES:
         return
@@ -167,13 +143,8 @@ def handle_state_changed(event_data):
         return
 
     now = datetime.now()
+    LAST_READINGS[entity_id] = {"value": val, "last_update": now}
 
-    LAST_READINGS[entity_id] = {
-        "value": val,
-        "last_update": now
-    }
-
-    # Store for historical graph
     with SENSOR_DF_LOCK:
         global SENSOR_DF
         SENSOR_DF = SENSOR_DF.append({
@@ -182,7 +153,6 @@ def handle_state_changed(event_data):
             "timestamp": time.time()
         }, ignore_index=True)
 
-    # Check threshold => notify
     if val < BATTERY_THRESHOLD:
         notify_ha(f"Battery low on '{entity_id}' -> {val:.1f}%")
 
@@ -190,24 +160,21 @@ def handle_state_changed(event_data):
 # WEBSOCKET LOOP
 ##############################################################################
 async def ha_websocket_loop():
-    """Connect to HA WebSocket, subscribe to state_changed, handle relevant events."""
+    """Connect to HA, subscribe to state_changed, handle relevant entities."""
     while True:
         try:
-            print(f"[Info] Connecting to {HA_WS_URL}...")
+            print(f"[Info] Connecting to {HA_WS_URL} ...")
             async with websockets.connect(HA_WS_URL, ping_interval=None) as ws:
                 # Wait for auth_required
-                msg_auth_req = await ws.recv()
-                print("[Debug] auth_required:", msg_auth_req)
+                auth_req = await ws.recv()
+                print("[Debug] auth_required:", auth_req)
 
                 # Send auth
-                await ws.send(json.dumps({
-                    "type": "auth",
-                    "access_token": HA_TOKEN
-                }))
+                await ws.send(json.dumps({"type": "auth", "access_token": HA_TOKEN}))
 
-                # Wait for auth_ok
-                msg_auth_ok = await ws.recv()
-                print("[Info] Auth response:", msg_auth_ok)
+                # Auth ok
+                auth_ok = await ws.recv()
+                print("[Info] Auth response:", auth_ok)
 
                 # Subscribe to state_changed
                 await ws.send(json.dumps({
@@ -215,10 +182,10 @@ async def ha_websocket_loop():
                     "type": "subscribe_events",
                     "event_type": "state_changed"
                 }))
-                ack = await ws.recv()
-                print("[Info] Subscribed:", ack)
+                sub_ack = await ws.recv()
+                print("[Info] Subscribed to state_changed:", sub_ack)
 
-                # Process incoming events
+                # Loop for events
                 while True:
                     msg_str = await ws.recv()
                     msg = json.loads(msg_str)
@@ -227,10 +194,10 @@ async def ha_websocket_loop():
                         handle_state_changed(msg["event"]["data"])
 
         except websockets.ConnectionClosedError as e:
-            print("[Error] WebSocket closed, retrying in 5s:", e)
+            print("[Error] WS disconnected, retrying in 5s:", e)
             await asyncio.sleep(5)
         except Exception as e:
-            print("[Error] Unexpected error in ha_websocket_loop:", e)
+            print("[Error] Unexpected in ha_websocket_loop:", e)
             await asyncio.sleep(5)
 
 ##############################################################################
@@ -239,81 +206,68 @@ async def ha_websocket_loop():
 @app.route("/")
 def index():
     return """
-    <h1>MDI Battery Entities Add-on</h1>
+    <h1>MDI Battery Add-on (Full Features)</h1>
     <ul>
-      <li><a href="/status">View Battery Status</a></li>
-      <li><a href="/graph">View Graph</a></li>
+      <li><a href="/status">Battery Status</a></li>
+      <li><a href="/graph">Graph</a></li>
     </ul>
     """
 
 @app.route("/status")
 def status_page():
-    """Shows a table of each entity with MDI icons + last update time."""
     cutoff = datetime.now() - timedelta(minutes=UNRESPONSIVE_MINUTES)
 
     html = [
-        "<h2>Battery Status</h2>",
+        "<h2>Battery Entities</h2>",
         "<table border='1' cellpadding='5'>",
         "<tr><th>Entity</th><th>Battery</th><th>Last Update</th></tr>"
     ]
 
     if not ENTITIES:
-        html.append("<tr><td colspan='3'>No entities configured.</td></tr>")
+        html.append("<tr><td colspan='3'>No ENTITIES configured.</td></tr>")
     else:
         for entity_id in ENTITIES:
             data = LAST_READINGS.get(entity_id)
             if not data:
-                # No data received yet
                 html.append(f"<tr><td>{entity_id}</td><td>?</td><td>No data</td></tr>")
                 continue
 
             val = data["value"]
-            last_update = data["last_update"]
+            last_up = data["last_update"]
 
-            if last_update < cutoff:
-                # Stale => red unknown icon
-                battery_svg = get_battery_svg_unknown()
-                battery_display = f"{battery_svg} Stale"
+            if last_up < cutoff:
+                battery_icon = get_battery_svg_unknown() + " Stale"
             else:
-                # Normal => color-coded icon
-                battery_svg = get_battery_svg(val)
-                battery_display = f"{battery_svg} {val:.1f}%"
+                battery_icon = f"{get_battery_svg(val)} {val:.1f}%"
 
-            html.append(
-                f"<tr><td>{entity_id}</td>"
-                f"<td>{battery_display}</td>"
-                f"<td>{last_update}</td></tr>"
-            )
+            html.append(f"<tr><td>{entity_id}</td><td>{battery_icon}</td><td>{last_up}</td></tr>")
 
     html.append("</table>")
     return "".join(html)
 
 @app.route("/graph")
 def graph_page():
-    """Plots historical battery data using matplotlib."""
     with SENSOR_DF_LOCK:
         if SENSOR_DF.empty:
-            return "No data yet."
+            return "No battery data collected yet."
 
-        plt.figure(figsize=(8, 4))
-
+        plt.figure(figsize=(8,4))
         for ent in SENSOR_DF["entity_id"].unique():
-            sub_df = SENSOR_DF[SENSOR_DF["entity_id"] == ent].copy()
-            sub_df.sort_values("timestamp", inplace=True)
-            plt.plot(sub_df["timestamp"], sub_df["value"], label=ent)
+            sub = SENSOR_DF[SENSOR_DF["entity_id"] == ent].copy()
+            sub.sort_values("timestamp", inplace=True)
+            plt.plot(sub["timestamp"], sub["value"], label=ent)
 
-        plt.legend()
         plt.xlabel("Timestamp")
         plt.ylabel("Battery Level")
         plt.title("Battery Levels Over Time")
+        plt.legend()
 
         buf = BytesIO()
         plt.savefig(buf, format="png")
         plt.close()
         buf.seek(0)
-        img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-
-    return f'<img src="data:image/png;base64,{img_b64}" />'
+        b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+        return f'<img src="data:image/png;base64,{b64}" />'
 
 ##############################################################################
 # STARTUP
@@ -323,11 +277,11 @@ def start_flask():
     serve(app, host="0.0.0.0", port=5000)
 
 def main():
-    # Run Flask in background
+    # 1) Start Flask in background
     flask_thread = threading.Thread(target=start_flask, daemon=True)
     flask_thread.start()
 
-    # Run websocket loop in main thread
+    # 2) Run WebSocket loop in main thread
     loop = asyncio.get_event_loop()
     loop.run_until_complete(ha_websocket_loop())
 
