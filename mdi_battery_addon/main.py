@@ -29,7 +29,7 @@ LAST_READINGS = {}  # { "entity_id": {"value": float, "last_update": datetime} }
 app = Flask(__name__)
 
 ##############################################################################
-# ENV VARS FROM run.sh
+# ENV VARS
 ##############################################################################
 def env(key, default=None):
     return os.environ.get(key, default)
@@ -106,11 +106,10 @@ def notify_ha(message: str):
         print("[Warn] No HA_TOKEN set; skipping notification.")
         return
 
-    # Convert ws:// to http:// for REST calls
     rest_url = HA_WS_URL.replace("ws", "http").replace("/api/websocket", "") + "/api/services/" + NOTIFY_SERVICE
     headers = {
         "Authorization": f"Bearer {HA_TOKEN}",
-        "Content-Type": "application/json",
+        "Content-Type": "application/json"
     }
     payload = {
         "message": message,
@@ -160,23 +159,17 @@ def handle_state_changed(event_data):
 # WEBSOCKET LOOP
 ##############################################################################
 async def ha_websocket_loop():
-    """Connect to HA, subscribe to state_changed, handle relevant entities."""
     while True:
         try:
             print(f"[Info] Connecting to {HA_WS_URL} ...")
             async with websockets.connect(HA_WS_URL, ping_interval=None) as ws:
-                # Wait for auth_required
                 auth_req = await ws.recv()
                 print("[Debug] auth_required:", auth_req)
 
-                # Send auth
                 await ws.send(json.dumps({"type": "auth", "access_token": HA_TOKEN}))
-
-                # Auth ok
                 auth_ok = await ws.recv()
                 print("[Info] Auth response:", auth_ok)
 
-                # Subscribe to state_changed
                 await ws.send(json.dumps({
                     "id": 1,
                     "type": "subscribe_events",
@@ -185,7 +178,6 @@ async def ha_websocket_loop():
                 sub_ack = await ws.recv()
                 print("[Info] Subscribed to state_changed:", sub_ack)
 
-                # Loop for events
                 while True:
                     msg_str = await ws.recv()
                     msg = json.loads(msg_str)
@@ -194,7 +186,7 @@ async def ha_websocket_loop():
                         handle_state_changed(msg["event"]["data"])
 
         except websockets.ConnectionClosedError as e:
-            print("[Error] WS disconnected, retrying in 5s:", e)
+            print("[Error] WS disconnected, retry 5s:", e)
             await asyncio.sleep(5)
         except Exception as e:
             print("[Error] Unexpected in ha_websocket_loop:", e)
@@ -203,10 +195,12 @@ async def ha_websocket_loop():
 ##############################################################################
 # FLASK ROUTES
 ##############################################################################
+app = Flask(__name__)
+
 @app.route("/")
 def index():
     return """
-    <h1>MDI Battery Add-on (Full Features)</h1>
+    <h1>MDI Battery Add-on (S6 Fixed)</h1>
     <ul>
       <li><a href="/status">Battery Status</a></li>
       <li><a href="/graph">Graph</a></li>
@@ -216,7 +210,6 @@ def index():
 @app.route("/status")
 def status_page():
     cutoff = datetime.now() - timedelta(minutes=UNRESPONSIVE_MINUTES)
-
     html = [
         "<h2>Battery Entities</h2>",
         "<table border='1' cellpadding='5'>",
@@ -226,21 +219,22 @@ def status_page():
     if not ENTITIES:
         html.append("<tr><td colspan='3'>No ENTITIES configured.</td></tr>")
     else:
-        for entity_id in ENTITIES:
-            data = LAST_READINGS.get(entity_id)
+        for ent_id in ENTITIES:
+            data = LAST_READINGS.get(ent_id)
             if not data:
-                html.append(f"<tr><td>{entity_id}</td><td>?</td><td>No data</td></tr>")
+                html.append(f"<tr><td>{ent_id}</td><td>?</td><td>No data</td></tr>")
                 continue
 
             val = data["value"]
-            last_up = data["last_update"]
-
-            if last_up < cutoff:
-                battery_icon = get_battery_svg_unknown() + " Stale"
+            lu = data["last_update"]
+            if lu < cutoff:
+                icon = get_battery_svg_unknown() + " Stale"
             else:
-                battery_icon = f"{get_battery_svg(val)} {val:.1f}%"
+                icon = f"{get_battery_svg(val)} {val:.1f}%"
 
-            html.append(f"<tr><td>{entity_id}</td><td>{battery_icon}</td><td>{last_up}</td></tr>")
+            html.append(
+                f"<tr><td>{ent_id}</td><td>{icon}</td><td>{lu}</td></tr>"
+            )
 
     html.append("</table>")
     return "".join(html)
@@ -249,17 +243,17 @@ def status_page():
 def graph_page():
     with SENSOR_DF_LOCK:
         if SENSOR_DF.empty:
-            return "No battery data collected yet."
+            return "No battery data yet."
 
         plt.figure(figsize=(8,4))
-        for ent in SENSOR_DF["entity_id"].unique():
-            sub = SENSOR_DF[SENSOR_DF["entity_id"] == ent].copy()
-            sub.sort_values("timestamp", inplace=True)
-            plt.plot(sub["timestamp"], sub["value"], label=ent)
+        for e in SENSOR_DF["entity_id"].unique():
+            subdf = SENSOR_DF[SENSOR_DF["entity_id"] == e].copy()
+            subdf.sort_values("timestamp", inplace=True)
+            plt.plot(subdf["timestamp"], subdf["value"], label=e)
 
+        plt.title("Battery Levels Over Time")
         plt.xlabel("Timestamp")
         plt.ylabel("Battery Level")
-        plt.title("Battery Levels Over Time")
         plt.legend()
 
         buf = BytesIO()
@@ -267,23 +261,23 @@ def graph_page():
         plt.close()
         buf.seek(0)
         b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-        return f'<img src="data:image/png;base64,{b64}" />'
+        return f"<img src='data:image/png;base64,{b64}'/>"
 
 ##############################################################################
-# STARTUP
+# MAIN
 ##############################################################################
-def start_flask():
-    from waitress import serve
-    serve(app, host="0.0.0.0", port=5000)
-
 def main():
     # 1) Start Flask in background
     flask_thread = threading.Thread(target=start_flask, daemon=True)
     flask_thread.start()
 
-    # 2) Run WebSocket loop in main thread
+    # 2) WebSocket loop in main thread
     loop = asyncio.get_event_loop()
     loop.run_until_complete(ha_websocket_loop())
+
+def start_flask():
+    from waitress import serve
+    serve(app, host="0.0.0.0", port=5000)
 
 if __name__ == "__main__":
     main()
