@@ -1,24 +1,15 @@
 {
-  "name": "MDI Battery Add-on (Full Features)",
+  "name": "MDI Battery Add-on (S6 Fixed)",
   "slug": "mdi_battery_addon",
   "version": "1.0.0",
-  "description": "A fully loaded add-on with MDI battery icons, WS connection to HA, stale detection, notifications, graphing, and PIP_BREAK_SYSTEM_PACKAGES=1 fix.",
-  "arch": [
-    "armhf",
-    "armv7",
-    "aarch64",
-    "amd64",
-    "i386"
-  ],
+  "description": "Full battery add-on using s6 services, PEP 668 override, no more pid1 errors.",
+  "arch": ["armhf", "armv7", "aarch64", "amd64", "i386"],
   "startup": "services",
   "boot": "auto",
   "options": {
     "HA_URL": "ws://172.168.1.8:8123/api/websocket",
     "HA_TOKEN": "",
-    "ENTITIES": [
-      "sensor.my_phone_battery",
-      "sensor.my_motion_sensor_battery"
-    ],
+    "ENTITIES": ["sensor.my_phone_battery", "sensor.door_lock_battery"],
     "BATTERY_THRESHOLD": 20.0,
     "UNRESPONSIVE_MINUTES": 30,
     "NOTIFY_SERVICE": "notify.notify"
