@@ -7,7 +7,7 @@
   "startup": "services",
   "boot": "auto",
   "options": {
-    "HA_URL": "ws://homeassistant.local:8123/api/websocket",
+    "HA_URL": "ws://172.168.1.8:8123/api/websocket",
     "HA_TOKEN": "",
     "ENTITIES": ["sensor.my_phone_battery", "sensor.door_lock_battery"],
     "BATTERY_THRESHOLD": 20.0,
