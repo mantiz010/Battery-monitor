@@ -1,4 +1,3 @@
-#!/usr/bin/execlineb -P
-
-# Run the Python application
-/usr/bin/python3 /app/main.py
+#!/usr/bin/with-contenv bash
+set -e
+exec python3 /app/main.py
