@@ -1,13 +1,13 @@
 {
-  "name": "MDI Battery Add-on (S6 Fixed)",
+  "name": "MDI Battery Add-on (Fully Fixed)",
   "slug": "mdi_battery_addon",
-  "version": "1.0.0",
-  "description": "Full battery add-on using s6 services, PEP 668 override, no more pid1 errors.",
+  "version": "1.1.0",
+  "description": "A robust Home Assistant add-on with WebSocket handling, structured logging, and debugging tools.",
   "arch": ["armhf", "armv7", "aarch64", "amd64", "i386"],
   "startup": "services",
   "boot": "auto",
   "options": {
-    "HA_URL": "ws://172.168.1.8:8123/api/websocket",
+    "HA_URL": "ws://homeassistant.local:8123/api/websocket",
     "HA_TOKEN": "",
     "ENTITIES": ["sensor.my_phone_battery", "sensor.door_lock_battery"],
     "BATTERY_THRESHOLD": 20.0,
