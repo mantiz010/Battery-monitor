@@ -1,3 +1,8 @@
 #!/usr/bin/with-contenv bash
 set -e
+
+# Log startup message
+echo "Starting MDI Battery Add-on..."
+
+# Start the Python application
 exec python3 /app/main.py
